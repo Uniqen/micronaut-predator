@@ -19,7 +19,7 @@ class PetController {
         this.petRepository = petRepository;
     }
 
-    @Get("/")
+    @Get("/{?pageable*}")
     List<NameDTO> all(Pageable pageable) {
         return petRepository.list(pageable);
     }
