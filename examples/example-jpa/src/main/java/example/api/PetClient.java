@@ -1,17 +1,19 @@
 package example.api;
 
-import example.domain.NameDTO;
-import io.micronaut.data.model.Pageable;
+import example.domain.Pet;
+import io.micronaut.data.model.Page;
 import io.micronaut.http.annotation.Get;
+import io.micronaut.http.annotation.QueryValue;
 import io.micronaut.http.client.annotation.Client;
-
-import java.util.List;
 
 
 @Client("/pets")
 public interface PetClient {
 
-    @Get("/{?pageable*}")
-    List<NameDTO> all(Pageable pageable);
+    @Get("/")
+    Page<Pet> all(@QueryValue("page") int number, @QueryValue("size") int size);
+
+    @Get("/")
+    Page<Pet> all(@QueryValue("page") int number, @QueryValue("size") int size, @QueryValue("sort") String sort);
 
 }

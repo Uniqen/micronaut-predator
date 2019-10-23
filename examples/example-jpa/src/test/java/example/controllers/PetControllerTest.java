@@ -1,16 +1,13 @@
 package example.controllers;
 
 import example.api.PetClient;
-import example.domain.NameDTO;
-import io.micronaut.data.model.Pageable;
+import example.domain.Pet;
+import io.micronaut.data.model.Page;
 import io.micronaut.test.annotation.MicronautTest;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 
 import javax.inject.Inject;
-import java.util.List;
-
-import static io.micronaut.data.model.Sort.Order.Direction.DESC;
 
 @MicronautTest
 class PetControllerTest {
@@ -19,13 +16,24 @@ class PetControllerTest {
     PetClient petClient;
 
     @Test
-    void testListPetNamesBySortedPaged() {
+    void testListPetByPage() {
 
-        List<NameDTO> results = petClient.all(Pageable.from(1,1).order("name", DESC));
+        Page<Pet> results = petClient.all(0, 2);
 
         Assertions.assertEquals(
-                1,
-                results.size()
+                2,
+                results.getNumberOfElements()
+        );
+    }
+
+    @Test
+    void testListPetBySortedPage() {
+
+        Page<Pet> results = petClient.all(0, 2, "name,DESC");
+
+        Assertions.assertEquals(
+                2,
+                results.getNumberOfElements()
         );
     }
 

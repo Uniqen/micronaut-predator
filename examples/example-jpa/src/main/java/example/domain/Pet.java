@@ -1,5 +1,7 @@
 package example.domain;
 
+import com.fasterxml.jackson.annotation.JsonIgnore;
+
 import javax.persistence.Entity;
 import javax.persistence.GeneratedValue;
 import javax.persistence.Id;
@@ -12,6 +14,7 @@ public class Pet {
     @GeneratedValue
     private Long id;
     private String name;
+    @JsonIgnore
     @ManyToOne
     private Owner owner;
     private PetType type = PetType.DOG;

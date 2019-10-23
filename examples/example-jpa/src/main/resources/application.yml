@@ -20,4 +20,6 @@ jpa:
           provider: none
         hbm2ddl:
           auto: update
-
+jackson:
+  serialization:
+    indentOutput: true
