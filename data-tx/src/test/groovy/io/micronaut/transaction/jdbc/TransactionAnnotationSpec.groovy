@@ -51,6 +51,14 @@ class TransactionAnnotationSpec extends Specification {
         e2.message == 'Bad things happened'
         testService.lastEvent == null
         testService.readTransactionally() == 1
+
+
+        when:"Test that connections are never exhausted"
+        int i = 0
+        200.times { i += testService.readTransactionally() }
+
+        then:"We're ok at it completed"
+        i == 200
     }
 
     @Singleton

@@ -52,10 +52,10 @@ import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 import java.util.regex.Matcher;
-import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
 import static io.micronaut.data.intercept.annotation.DataMethod.META_MEMBER_PAGE_SIZE;
+import static io.micronaut.data.model.query.builder.QueryBuilder.VARIABLE_PATTERN;
 
 /**
  * Abstract interceptor that executes a {@link io.micronaut.data.annotation.Query}.
@@ -65,7 +65,6 @@ import static io.micronaut.data.intercept.annotation.DataMethod.META_MEMBER_PAGE
  * @author graemerocher
  */
 public abstract class AbstractQueryInterceptor<T, R> implements DataInterceptor<T, R> {
-    private static final Pattern VARIABLE_PATTERN = Pattern.compile("(:[a-zA-Z0-9]+)");
     private static final String PREDATOR_ANN_NAME = DataMethod.class.getName();
     private static final int[] EMPTY_INT_ARRAY = new int[0];
     protected final RepositoryOperations operations;
@@ -402,11 +401,19 @@ public abstract class AbstractQueryInterceptor<T, R> implements DataInterceptor<
         for (PersistentProperty prop : persistentProperties) {
             if (!prop.isReadOnly() && !prop.isGenerated()) {
                 String propName = prop.getName();
-                Object v = parameterValues.get(propName);
-                if (v == null && !prop.isOptional()) {
-                    throw new IllegalArgumentException("Argument [" + propName + "] cannot be null");
+                if (parameterValues.containsKey(propName)) {
+
+                    Object v = parameterValues.get(propName);
+                    if (v == null && !prop.isOptional()) {
+                        throw new IllegalArgumentException("Argument [" + propName + "] cannot be null");
+                    }
+                    wrapper.setProperty(propName, v);
+                } else if (!prop.isOptional()) {
+                    final Optional<Object> p = wrapper.getProperty(propName, Object.class);
+                    if (!p.isPresent()) {
+                        throw new IllegalArgumentException("Argument [" + propName + "] cannot be null");
+                    }
                 }
-                wrapper.setProperty(propName, v);
             }
         }
         return instance;

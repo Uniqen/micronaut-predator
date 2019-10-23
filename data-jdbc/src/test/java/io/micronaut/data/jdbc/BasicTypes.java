@@ -18,6 +18,7 @@ package io.micronaut.data.jdbc;
 import io.micronaut.data.annotation.GeneratedValue;
 import io.micronaut.data.annotation.Id;
 
+import javax.persistence.Column;
 import javax.persistence.Entity;
 import javax.persistence.Table;
 import java.math.BigDecimal;
@@ -64,7 +65,8 @@ public class BasicTypes {
     private LocalDateTime localDateTime = LocalDateTime.now();
     private Instant instant = Instant.now();
     private UUID uuid = UUID.randomUUID();
-    private BigDecimal bigDecimal = new BigDecimal("100");
+    @Column(columnDefinition = "DECIMAL(24) NOT NULL")
+    private BigDecimal bigDecimal = new BigDecimal(Long.MAX_VALUE + "000");
     private TimeZone timeZone = TimeZone.getTimeZone("GMT");
     private Charset charset = StandardCharsets.UTF_8;
 

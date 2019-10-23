@@ -17,12 +17,13 @@ package io.micronaut.data.model.query.builder;
 
 import edu.umd.cs.findbugs.annotations.NonNull;
 import edu.umd.cs.findbugs.annotations.Nullable;
+import io.micronaut.core.annotation.AnnotationMetadata;
+import io.micronaut.core.annotation.Internal;
 import io.micronaut.core.util.ArgumentUtils;
 import io.micronaut.core.util.CollectionUtils;
-import io.micronaut.data.annotation.DataTransformer;
-import io.micronaut.data.annotation.Join;
-import io.micronaut.data.annotation.MappedEntity;
-import io.micronaut.data.annotation.MappedProperty;
+import io.micronaut.core.util.StringUtils;
+import io.micronaut.data.annotation.*;
+import io.micronaut.data.annotation.repeatable.WhereSpecifications;
 import io.micronaut.data.model.*;
 import io.micronaut.data.model.naming.NamingStrategy;
 import io.micronaut.data.model.query.AssociationQuery;
@@ -32,6 +33,8 @@ import io.micronaut.data.model.query.QueryParameter;
 
 import java.util.*;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.regex.Matcher;
+import java.util.stream.Collectors;
 
 /**
  * An abstract class for builders that build SQL-like queries.
@@ -342,17 +345,17 @@ public abstract class AbstractSqlLikeQueryBuilder implements QueryBuilder {
 
         queryHandlers.put(QueryModel.StartsWith.class, (queryState, criterion) -> {
             QueryModel.StartsWith eq = (QueryModel.StartsWith) criterion;
-            appendLikeComparison(queryState, eq, " LIKE CONCAT(", ",'%')");
+            appendLikeComparison(queryState, eq, formatStartsWithBeginning(), formatEndsWith());
         });
 
         queryHandlers.put(QueryModel.Contains.class, (queryState, criterion) -> {
             QueryModel.Contains eq = (QueryModel.Contains) criterion;
-            appendLikeComparison(queryState, eq, " LIKE CONCAT('%',", ",'%')");
+            appendLikeComparison(queryState, eq, formatStartsWith(), formatEndsWith());
         });
 
         queryHandlers.put(QueryModel.EndsWith.class, (queryState, criterion) -> {
             QueryModel.EndsWith eq = (QueryModel.EndsWith) criterion;
-            appendLikeComparison(queryState, eq, " LIKE CONCAT('%',", ")");
+            appendLikeComparison(queryState, eq, formatStartsWith(), formEndsWithEnd());
         });
 
         queryHandlers.put(QueryModel.In.class, (queryState, criterion) -> {
@@ -385,6 +388,34 @@ public abstract class AbstractSqlLikeQueryBuilder implements QueryBuilder {
             String comparisonExpression = " NOT IN (";
             handleSubQuery(queryState, (QueryModel.SubqueryCriterion) criterion, comparisonExpression);
         });
+    }
+
+    /**
+     * @return Formats end of an ends with expression
+     */
+    protected String formEndsWithEnd() {
+        return ")";
+    }
+
+    /**
+     * @return Formats the beginning of an starts with expression
+     */
+    protected String formatStartsWithBeginning() {
+        return " LIKE CONCAT(";
+    }
+
+    /**
+     * @return Formats the ends with expression.
+     */
+    protected String formatEndsWith() {
+        return ",'%')";
+    }
+
+    /**
+     * @return Formats the starts with expression.
+     */
+    protected String formatStartsWith() {
+        return " LIKE CONCAT('%',";
     }
 
     private void appendEmptyExpression(QueryState queryState, String charSequencePrefix, String charSequenceSuffix, String listSuffix, String name) {
@@ -467,9 +498,9 @@ public abstract class AbstractSqlLikeQueryBuilder implements QueryBuilder {
                 .append(CLOSE_BRACKET);
     }
 
-    @NonNull
     @Override
-    public QueryResult buildQuery(@NonNull QueryModel query) {
+    public QueryResult buildQuery(@NonNull AnnotationMetadata annotationMetadata, @NonNull QueryModel query) {
+        ArgumentUtils.requireNonNull("annotationMetadata", annotationMetadata);
         ArgumentUtils.requireNonNull("query", query);
         QueryState queryState = newQueryState(query, true);
         queryState.getQuery().append(SELECT_CLAUSE);
@@ -482,12 +513,17 @@ public abstract class AbstractSqlLikeQueryBuilder implements QueryBuilder {
             queryState.applyJoin(joinPath);
         }
         Map<String, String> parameters = null;
-        if (!criteria.isEmpty()) {
-            parameters = buildWhereClause(criteria, queryState);
+        if (!criteria.isEmpty() || annotationMetadata.hasStereotype(WhereSpecifications.class) || queryState.getEntity().getAnnotationMetadata().hasStereotype(WhereSpecifications.class)) {
+            parameters = buildWhereClause(annotationMetadata, criteria, queryState);
         }
 
         appendOrder(query, queryState);
-        return QueryResult.of(queryState.getQuery().toString(), parameters, queryState.getParameterTypes());
+        return QueryResult.of(
+                queryState.getQuery().toString(),
+                parameters,
+                queryState.getParameterTypes(),
+                queryState.getAdditionalRequiredParameters()
+        );
     }
 
     /**
@@ -608,7 +644,7 @@ public abstract class AbstractSqlLikeQueryBuilder implements QueryBuilder {
      * @return True if they should be escaped
      */
     protected boolean shouldEscape(@NonNull PersistentEntity entity) {
-        return entity.getAnnotationMetadata().isTrue(MappedEntity.class, "escape");
+        return entity.getAnnotationMetadata().booleanValue(MappedEntity.class, "escape").orElse(true);
     }
 
     /**
@@ -821,6 +857,7 @@ public abstract class AbstractSqlLikeQueryBuilder implements QueryBuilder {
     }
 
     private Map<String, String> buildWhereClause(
+            AnnotationMetadata annotationMetadata,
             QueryModel.Junction criteria,
             QueryState queryState) {
         if (!criteria.isEmpty()) {
@@ -834,12 +871,52 @@ public abstract class AbstractSqlLikeQueryBuilder implements QueryBuilder {
             whereClause.append(OPEN_BRACKET);
             buildWhereClauseForCriterion(queryState, criteria, criterionList);
             String whereStr = whereClause.toString();
+            final String additionalWhere = buildAdditionalWhereString(queryState.getEntity(), annotationMetadata);
+            Matcher matcher = QueryBuilder.VARIABLE_PATTERN.matcher(additionalWhere);
+
+            while (matcher.find()) {
+                String name = matcher.group(2);
+                queryState.addRequiredParameters(name);
+                final Placeholder ph = queryState.newParameter();
+                queryState.getParameters().put(ph.getKey(), ph.getName());
+            }
             if (!whereStr.equals(WHERE_CLAUSE + OPEN_BRACKET)) {
-                queryState.getQuery().append(whereStr);
-                queryState.getQuery().append(CLOSE_BRACKET);
+                final StringBuilder queryBuilder = queryState.getQuery();
+                queryBuilder.append(whereStr);
+                if (StringUtils.isNotEmpty(additionalWhere)) {
+                    queryBuilder.append(LOGICAL_AND).append(OPEN_BRACKET).append(additionalWhere).append(CLOSE_BRACKET);
+                }
+                queryBuilder.append(CLOSE_BRACKET);
+            }
+        } else {
+            final String additionalWhereString = buildAdditionalWhereString(queryState.getEntity(), annotationMetadata);
+            if (StringUtils.isNotEmpty(additionalWhereString)) {
+                final StringBuilder whereClause = queryState.getWhereClause();
+                whereClause.append(WHERE_CLAUSE)
+                           .append(OPEN_BRACKET)
+                           .append(additionalWhereString)
+                           .append(CLOSE_BRACKET);
+                queryState.getQuery().append(whereClause.toString());
             }
         }
         return queryState.getParameters();
+    }
+
+    private String buildAdditionalWhereString(PersistentEntity entity, AnnotationMetadata annotationMetadata) {
+        final String whereStr = resolveWhereForAnnotationMetadata(annotationMetadata);
+        if (StringUtils.isNotEmpty(whereStr)) {
+            return whereStr;
+        } else {
+            return resolveWhereForAnnotationMetadata(entity.getAnnotationMetadata());
+        }
+    }
+
+    private String resolveWhereForAnnotationMetadata(AnnotationMetadata annotationMetadata) {
+        return annotationMetadata.getAnnotationValuesByType(Where.class)
+                .stream()
+                .map(av -> av.stringValue().orElse(null))
+                .filter(StringUtils::isNotEmpty)
+                .collect(Collectors.joining(LOGICAL_AND));
     }
 
     private void appendOrder(QueryModel query, QueryState queryState) {
@@ -1218,9 +1295,8 @@ public abstract class AbstractSqlLikeQueryBuilder implements QueryBuilder {
      */
     protected abstract boolean computePropertyPaths();
 
-    @NonNull
     @Override
-    public QueryResult buildUpdate(@NonNull QueryModel query, List<String> propertiesToUpdate) {
+    public QueryResult buildUpdate(@NonNull AnnotationMetadata annotationMetadata, @NonNull QueryModel query, @NonNull List<String> propertiesToUpdate) {
         if (propertiesToUpdate.isEmpty()) {
             throw new IllegalArgumentException("No properties specified to update");
         }
@@ -1242,13 +1318,17 @@ public abstract class AbstractSqlLikeQueryBuilder implements QueryBuilder {
                     .append(currentAlias);
         }
         buildUpdateStatement(queryState, propertiesToUpdate);
-        buildWhereClause(query.getCriteria(), queryState);
-        return QueryResult.of(queryString.toString(), queryState.getParameters(), queryState.getParameterTypes());
+        buildWhereClause(annotationMetadata, query.getCriteria(), queryState);
+        return QueryResult.of(
+                queryString.toString(),
+                queryState.getParameters(),
+                queryState.getParameterTypes(),
+                queryState.getAdditionalRequiredParameters()
+        );
     }
 
-    @NonNull
     @Override
-    public QueryResult buildDelete(@NonNull QueryModel query) {
+    public QueryResult buildDelete(@NonNull AnnotationMetadata annotationMetadata, @NonNull QueryModel query) {
         PersistentEntity entity = query.getPersistentEntity();
         QueryState queryState = newQueryState(query, false);
         StringBuilder queryString = queryState.getQuery();
@@ -1267,8 +1347,13 @@ public abstract class AbstractSqlLikeQueryBuilder implements QueryBuilder {
             buffer.append(getTableAsKeyword())
                     .append(currentAlias);
         }
-        buildWhereClause(query.getCriteria(), queryState);
-        return QueryResult.of(queryString.toString(), queryState.getParameters(), queryState.getParameterTypes());
+        buildWhereClause(annotationMetadata, query.getCriteria(), queryState);
+        return QueryResult.of(
+                queryString.toString(),
+                queryState.getParameters(),
+                queryState.getParameterTypes(),
+                queryState.getAdditionalRequiredParameters()
+        );
     }
 
     /**
@@ -1327,7 +1412,12 @@ public abstract class AbstractSqlLikeQueryBuilder implements QueryBuilder {
             }
         }
 
-        return QueryResult.of(buff.toString(), Collections.emptyMap(), Collections.emptyMap());
+        return QueryResult.of(
+                buff.toString(),
+                Collections.emptyMap(),
+                Collections.emptyMap(),
+                Collections.emptySet()
+        );
     }
 
     /**
@@ -1365,6 +1455,7 @@ public abstract class AbstractSqlLikeQueryBuilder implements QueryBuilder {
     /**
      * The state of the query.
      */
+    @Internal
     protected final class QueryState {
         private final Map<String, String> appliedJoinPaths = new HashMap<>();
         private final AtomicInteger position = new AtomicInteger(0);
@@ -1378,6 +1469,7 @@ public abstract class AbstractSqlLikeQueryBuilder implements QueryBuilder {
         private String currentAlias;
         private PersistentEntity entity;
         private Embedded currentEmbedded;
+        private Set<String> additionalRequiredParameters;
 
         private QueryState(QueryModel query, boolean allowJoins) {
             this.allowJoins = allowJoins;
@@ -1456,6 +1548,17 @@ public abstract class AbstractSqlLikeQueryBuilder implements QueryBuilder {
          */
         public void addParameterType(@NonNull String name, @NonNull DataType dataType) {
             this.parameterTypes.put(name, dataType);
+        }
+
+        /**
+         * Add a required parameter.
+         * @param name The name
+         */
+        public void addRequiredParameters(@NonNull String name) {
+            if (additionalRequiredParameters == null) {
+                additionalRequiredParameters = new HashSet<>(5);
+            }
+            additionalRequiredParameters.add(name);
         }
 
         /**
@@ -1539,8 +1642,7 @@ public abstract class AbstractSqlLikeQueryBuilder implements QueryBuilder {
          * @param associationPath The assocation path.
          * @return The alias
          */
-        public @NonNull
-        String computeAlias(String associationPath) {
+        public @NonNull String computeAlias(String associationPath) {
             String name = getCurrentAlias() + DOT + associationPath;
             if (appliedJoinPaths.containsKey(name)) {
                 return appliedJoinPaths.get(name);
@@ -1561,6 +1663,14 @@ public abstract class AbstractSqlLikeQueryBuilder implements QueryBuilder {
          */
         public boolean shouldEscape() {
             return escape;
+        }
+
+        /**
+         * The additional required parameters.
+         * @return The parameters
+         */
+        public @Nullable Set<String> getAdditionalRequiredParameters() {
+            return this.additionalRequiredParameters;
         }
     }
 
