@@ -2,7 +2,7 @@ package example.controllers;
 
 import example.api.PetClient;
 import example.domain.NameDTO;
-import io.micronaut.data.model.Pageable;
+import io.micronaut.data.model.PageableQuery;
 import io.micronaut.test.annotation.MicronautTest;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
@@ -21,7 +21,9 @@ class PetControllerTest {
     @Test
     void testListPetNamesBySortedPaged() {
 
-        List<NameDTO> results = petClient.all(Pageable.from(1,1).order("name", DESC));
+        PageableQuery pageable = PageableQuery.from(1, 1)
+                .order("name", DESC);
+        List<NameDTO> results = petClient.all(pageable);
 
         Assertions.assertEquals(
                 1,
