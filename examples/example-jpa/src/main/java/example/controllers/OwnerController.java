@@ -3,6 +3,7 @@ package example.controllers;
 import java.util.List;
 import java.util.Optional;
 
+import javax.transaction.Transactional;
 import javax.validation.constraints.NotBlank;
 
 import example.domain.Owner;
@@ -20,6 +21,7 @@ class OwnerController {
     }
 
     @Get("/")
+    @Transactional
     List<Owner> all() {
         return ownerRepository.findAll();
     }
