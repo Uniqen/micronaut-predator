@@ -1,14 +1,14 @@
 package example.repositories;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertNotNull;
+import example.domain.Pet;
+import example.domain.PetDTO;
+import io.micronaut.test.annotation.MicronautTest;
+import org.junit.jupiter.api.Test;
 
 import javax.inject.Inject;
 
-import org.junit.jupiter.api.Test;
-
-import example.domain.Pet;
-import io.micronaut.test.annotation.MicronautTest;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 
 @MicronautTest
 public class PetRepositoryTest {
@@ -22,5 +22,21 @@ public class PetRepositoryTest {
         assertNotNull(dino);
         assertEquals("Dino", dino.getName());
         assertEquals("Fred", dino.getOwner().getName());
+    }
+
+    @Test
+    void testRetrievePetAndOwnerId() {
+        PetDTO dino = petRepository.getByName("Dino").orElse(null);
+        assertNotNull(dino);
+        assertEquals("Dino", dino.getName());
+        assertNotNull(dino.getOwner().getId());
+    }
+
+    @Test
+    void testRetrievePetDTOByID() {
+        PetDTO dino = petRepository.getByName("Dino").orElse(null);
+        assertNotNull(dino);
+        PetDTO dinoById = petRepository.getById(dino.getId()).orElse(null);
+        assertNotNull(dinoById);
     }
 }
